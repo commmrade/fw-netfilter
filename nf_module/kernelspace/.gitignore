@@ -1,0 +1,6 @@
+*
+!.gitignore
+!fwlish_main.c
+!fwlish_nl.h
+!fwlish_nl.c
+!fwlish_family.h

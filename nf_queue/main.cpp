@@ -30,6 +30,10 @@ struct Context {
     mnl_socket* nl_sock;
     std::vector<std::uint32_t> forbid_addrs;
     std::vector<std::uint16_t> forbid_ports;
+
+    ~Context() {
+        mnl_socket_close(nl_sock);
+    }
 };
 
 int set_verdict(mnl_socket* sock, int packet_id, int verdict) {
@@ -135,27 +139,26 @@ int main(int argc, char** argv) {
     ctx.forbid_addrs = std::move(ips);
     ctx.forbid_ports = std::move(ports);
 
-    mnl_socket* nl_sock = mnl_socket_open(NETLINK_NETFILTER);
-    if (!nl_sock) {
+    ctx.nl_sock = mnl_socket_open(NETLINK_NETFILTER);
+    if (!ctx.nl_sock) {
         perror("netlink socket open failed");
         return -1;
     }
-    ctx.nl_sock = nl_sock;
 
-    int ret = mnl_socket_bind(nl_sock, 0, MNL_SOCKET_AUTOPID);
+    int ret = mnl_socket_bind(ctx.nl_sock, 0, MNL_SOCKET_AUTOPID);
     if (ret < 0) {
         perror("netlink socket bind failed");
         return -1;
     }
 
-    const auto portid = mnl_socket_get_portid(nl_sock); // netlink port id, usually == PID, but not the always the case
+    const auto portid = mnl_socket_get_portid(ctx.nl_sock); // netlink port id, usually == PID, but not the always the case
 
     std::unique_ptr<char[]> buf{new char[BUF_SIZE]};
 
     nlmsghdr* nlmsg = nfq_nlmsg_put(buf.get(), NFQNL_MSG_CONFIG, QUEUE_NUM);
     nfq_nlmsg_cfg_put_cmd(nlmsg, AF_INET, NFQNL_CFG_CMD_BIND);
 
-    ret = mnl_socket_sendto(nl_sock, nlmsg, nlmsg->nlmsg_len);
+    ret = mnl_socket_sendto(ctx.nl_sock, nlmsg, nlmsg->nlmsg_len);
     if (ret < 0) {
         perror("netlink socket send failed");
         return -1;
@@ -167,17 +170,17 @@ int main(int argc, char** argv) {
     mnl_attr_put_u32(nlmsg, NFQA_CFG_FLAGS, htonl(NFQA_CFG_F_GSO));
     mnl_attr_put_u32(nlmsg, NFQA_CFG_MASK, htonl(NFQA_CFG_F_GSO));
 
-    ret = mnl_socket_sendto(nl_sock, nlmsg, nlmsg->nlmsg_len);
+    ret = mnl_socket_sendto(ctx.nl_sock, nlmsg, nlmsg->nlmsg_len);
     if (ret < 0) {
         perror("netlink socket send failed");
         return -1;
     }
 
     ret = 1;
-    mnl_socket_setsockopt(nl_sock, NETLINK_NO_ENOBUFS, &ret, sizeof(ret));
+    mnl_socket_setsockopt(ctx.nl_sock, NETLINK_NO_ENOBUFS, &ret, sizeof(ret));
 
     while (true) {
-        ssize_t rd = mnl_socket_recvfrom(nl_sock, buf.get(), BUF_SIZE);
+        ssize_t rd = mnl_socket_recvfrom(ctx.nl_sock, buf.get(), BUF_SIZE);
         if (rd < 0) {
             perror("netlink socket recv failed");
             return -1;
@@ -190,6 +193,5 @@ int main(int argc, char** argv) {
         }
     }
 
-    mnl_socket_close(nl_sock);
     return 0;
 }

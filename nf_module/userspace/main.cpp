@@ -11,6 +11,7 @@
 #include <cassert>
 #include <print>
 #include <format>
+#include <memory>
 #include <cstring>
 #include <stdexcept>
 #include <vector>
@@ -37,7 +38,6 @@ nlmsghdr* prepare_request(mnl_socket* nl_sock, const int type, const int cmd) {
 nlmsghdr* response(ssize_t rd) {
     nlmsghdr* reply = reinterpret_cast<nlmsghdr*>(buf.data());
     if (!mnl_nlmsg_ok(reply, rd)) {
-        perror("mnl nlmsg failed");
         return nullptr;
     }
     return reply;
@@ -71,6 +71,7 @@ std::uint16_t get_family_id(mnl_socket* nl_sock, const std::string_view family_n
     }
 
     const auto* reply = response(rd);
+    assert(reply);
 
     if (reply->nlmsg_type == NLMSG_ERROR) {
         struct nlmsgerr *err = (struct nlmsgerr *)mnl_nlmsg_get_payload(reply);
@@ -109,6 +110,8 @@ std::vector<std::uint32_t> get_banlist(mnl_socket* nl_sock, std::uint16_t fam_id
     }
 
     const auto* reply_hdr = response(rd);
+    assert(reply_hdr);
+
     if (reply_hdr->nlmsg_type == NLMSG_ERROR) {
         struct nlmsgerr *err = (struct nlmsgerr *)mnl_nlmsg_get_payload(reply_hdr);
         throw std::runtime_error(std::format("nlmsg error: {}", err->error));
@@ -152,6 +155,8 @@ int set_banlist(mnl_socket* nl_sock, const std::vector<std::uint32_t> ips, const
     }
 
     auto* reply_hdr = response(rd);
+    assert(reply_hdr);
+
     if (reply_hdr->nlmsg_type == NLMSG_ERROR) {
         struct nlmsgerr *err = (struct nlmsgerr *)mnl_nlmsg_get_payload(reply_hdr);
         if (err->error != 0) {
@@ -163,19 +168,20 @@ int set_banlist(mnl_socket* nl_sock, const std::vector<std::uint32_t> ips, const
 }
 
 int main() {
-    mnl_socket* nl_sock = mnl_socket_open(NETLINK_GENERIC);
+    std::unique_ptr<mnl_socket, decltype(&mnl_socket_close)> nl_sock{mnl_socket_open(NETLINK_GENERIC), mnl_socket_close};
+
     if (!nl_sock) {
         perror("mnl_socket_open failed");
         return -1;
     }
 
-    if (mnl_socket_bind(nl_sock, 0, MNL_SOCKET_AUTOPID) < 0) {
+    if (mnl_socket_bind(nl_sock.get(), 0, MNL_SOCKET_AUTOPID) < 0) {
         perror("mnl_socket_bind");
         return -1;
     }
 
-    const auto fam_id = get_family_id(nl_sock, FWLISH_FAMILY_NAME);
-    get_banlist(nl_sock, fam_id);
+    const auto fam_id = get_family_id(nl_sock.get(), FWLISH_FAMILY_NAME);
+    get_banlist(nl_sock.get(), fam_id);
 
     std::vector<uint32_t> ips = {
         0x5DBAE1C2, // 93.186.225.194
@@ -189,8 +195,8 @@ int main() {
         ip = htonl(ip);
     }
     ips.resize(10);
-    set_banlist(nl_sock, ips, fam_id);
+    set_banlist(nl_sock.get(), ips, fam_id);
 
-    mnl_socket_close(nl_sock);
+    mnl_socket_close(nl_sock.get());
     return 0;
 }

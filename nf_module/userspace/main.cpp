@@ -11,6 +11,7 @@
 #include <cassert>
 #include <print>
 #include <format>
+#include <span>
 #include <memory>
 #include <cstring>
 #include <stdexcept>
@@ -167,7 +168,28 @@ int set_banlist(mnl_socket* nl_sock, const std::vector<std::uint32_t> ips, const
     return 0;
 }
 
-int main() {
+int main(int argc, char** argv) {
+    const auto ips_n = argc - 1;
+    if (ips_n < 1 || ips_n > 10) {
+        std::println(std::cerr, "You must enter 1 <= ips <= 10");
+        return 0;
+    }
+
+    std::vector<std::uint32_t> ips{};
+    ips.reserve(ips_n);
+
+    std::span<char*> args{argv + 1, static_cast<std::size_t>(argc - 1)};
+    for (const auto arg : args) {
+        std::uint32_t ip;
+
+        int r = inet_pton(AF_INET, arg, &ip);
+        if (r <= 0) {
+            std::println(std::cerr, "failed to convert {}: {}", arg, std::strerror(errno));
+        } else {
+            ips.push_back(ip);
+        }
+    }
+
     std::unique_ptr<mnl_socket, decltype(&mnl_socket_close)> nl_sock{mnl_socket_open(NETLINK_GENERIC), mnl_socket_close};
 
     if (!nl_sock) {
@@ -183,20 +205,8 @@ int main() {
     const auto fam_id = get_family_id(nl_sock.get(), FWLISH_FAMILY_NAME);
     get_banlist(nl_sock.get(), fam_id);
 
-    std::vector<uint32_t> ips = {
-        0x5DBAE1C2, // 93.186.225.194
-        0x57F08443, // 87.240.132.67
-        0x57F08185, // 87.240.129.133
-        0x57F089A4, // 87.240.137.164
-        0x57F08448, // 87.240.132.72
-        0x57F0844E, // 87.240.132.78
-    };
-    for (auto& ip : ips) {
-        ip = htonl(ip);
-    }
     ips.resize(10);
     set_banlist(nl_sock.get(), ips, fam_id);
 
-    mnl_socket_close(nl_sock.get());
     return 0;
 }
